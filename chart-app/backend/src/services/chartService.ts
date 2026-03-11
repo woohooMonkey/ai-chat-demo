@@ -3,6 +3,12 @@ import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
 import axios from 'axios';
+import Anthropic from '@anthropic-ai/sdk';
+
+// 初始化 Claude 客户端
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || ''
+});
 
 interface GenerateChartRequest {
   text: string;
@@ -70,6 +76,9 @@ let cachedChartTools: MCPTool[] | null = null;
 let chartToolsCacheTime: number = 0;
 const TOOLS_CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存
 
+// 工具描述缓存（避免重复构建字符串）
+let cachedToolsDescription: string | null = null;
+
 // MySQL 配置
 const MYSQL_CONFIG = {
   host: process.env.MYSQL_HOST || 'localhost',
@@ -82,6 +91,7 @@ const MYSQL_CONFIG = {
 function clearToolsCache() {
   cachedChartTools = null;
   chartToolsCacheTime = 0;
+  cachedToolsDescription = null;
 }
 
 // 启动时清除缓存
@@ -470,80 +480,74 @@ export class ChartService {
     chartTools: MCPTool[],
     dbSchema: string
   ): Promise<LLMResponse> {
-    const apiKey = process.env.ZHIPU_API_KEY || 'c29c79f11c4a47c68aff598bfc336e3f.Ci1b9LUredlioVJ7';
-    const apiUrl = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-
     const chartToolsDesc = this.buildToolsDescription(chartTools);
 
-    const prompt = `你是一个智能数据分析助手。请分析用户的请求，判断是否需要查询数据库。
-
-## 用户请求
-"${text}"
-
-## 数据库表结构
-${dbSchema || '(无法获取数据库结构)'}
+    // 优化：更清晰的 SQL 生成规则和字段映射
+    const systemPrompt = `你是一个智能数据分析助手，能够判断是否需要查询数据库并生成SQL或图表数据。
 
 ## 可用的图表工具
 ${chartToolsDesc}
 
 ## 判断规则
-1. 如果用户请求涉及"查询"、"数据库中"、"真实的"等关键词，或者明确要查看数据库中的数据，则需要查询数据库
-2. 如果数据库中有相关的表可以满足用户需求，应该优先使用数据库数据
-3. 如果用户只是简单的数据展示（如"桃10，李5"），不需要查询数据库
-4. 对于天气、股价等实时数据，数据库可能没有，使用模拟数据
+1. 如果用户请求涉及"查询"、"统计"、"按...分组"、"各..."等关键词，需要查询数据库
+2. 如果用户只是简单的数据展示（如"桃10，李5"），不需要查询数据库
+3. 对于天气、股价等实时数据，数据库可能没有，使用模拟数据
 
-## 重要：SQL 编写规则
-- 必须使用上面数据库表结构中列出的实际列名
-- 不要猜测列名，只使用表结构中存在的列
-- 如果需要求和，使用 SUM(列名)
-- 如果需要分组，使用 GROUP BY 列名
+## 关键字段映射（非常重要！）
+根据用户请求中的词汇，选择正确的数据库字段：
+- "地区" / "区域" / "华东/华北/华南" → 使用 region 字段
+- "品类" / "分类" / "类别" / "电子产品/服装/食品" → 使用 category 字段
+- "产品" / "商品名称" / "iPhone/运动鞋" → 使用 product_name 字段
+- "日期" / "时间" / "月份" → 使用 order_date 字段
+- "销售额" / "金额" / "总价" → 使用 amount 字段
+- "数量" / "销量" → 使用 quantity 字段
+
+## SQL 编写规则
+1. **必须使用上述映射的正确字段名**
+2. SELECT 中包含分组字段和聚合结果
+3. 使用 SUM() 求和、COUNT() 计数、AVG() 平均
+4. GROUP BY 使用正确的分组字段
+
+## SQL 示例
+- "按地区统计销售额": SELECT region, SUM(amount) as total_amount FROM sales_orders GROUP BY region
+- "各品类销售额": SELECT category, SUM(amount) as total_amount FROM sales_orders GROUP BY category
+- "各产品销售总额": SELECT product_name, SUM(amount) as total_amount FROM sales_orders GROUP BY product_name
 
 ## 返回格式（禁止使用注释！）
-必须返回以下严格的 JSON 格式，不要包含任何注释：
-{
-  "needDatabase": true,
-  "sqlQuery": "SELECT region, SUM(amount) as total_amount FROM sales_orders GROUP BY region"
-}
+需要数据库时返回：
+{"needDatabase": true, "sqlQuery": "SELECT 分组字段, 聚合函数(数值字段) as 别名 FROM sales_orders GROUP BY 分组字段"}
 
-如果不需要数据库：
-{
-  "needDatabase": false,
-  "chartData": {
-    "toolName": "generate_bar_chart",
-    "title": "图表标题",
-    "arguments": {
-      "data": [{"category": "项目1", "value": 100}],
-      "title": "图表标题"
-    }
-  }
-}
+不需要数据库时返回：
+{"needDatabase": false, "chartData": {"toolName": "generate_column_chart", "title": "标题", "arguments": {"data": [...], "title": "标题"}}}
 
-## 数据格式说明
-- 饼图/柱状图: data = [{"category": "名称", "value": 数值}]
-- 折线图: data = [{"time": "时间", "value": 数值, "group": "分组"}]
+只返回纯 JSON。`;
 
-只返回纯 JSON，不要包含任何注释、解释或 markdown 标记。`;
+    const userPrompt = `## 用户请求
+"${text}"
+
+## 数据库表结构
+${dbSchema || '(无法获取数据库结构)'}
+
+请根据用户请求中的关键词（地区/品类/产品），选择正确的字段生成 SQL。`;
 
     try {
-      const response = await axios.post(apiUrl, {
-        model: 'glm-4-flash',
+      // 使用 Claude SDK 调用
+      const message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1024,
+        system: systemPrompt,
         messages: [
-          {
-            role: 'system',
-            content: '你是一个数据分析助手，能够判断是否需要查询数据库并生成SQL或图表数据。只返回纯JSON。'
-          },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.1
-      }, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        }
+          { role: 'user', content: userPrompt }
+        ]
       });
 
-      const content = response.data.choices[0].message.content;
-      console.log('🤖 LLM 原始返回:', content);
+      // 提取文本内容
+      const content = message.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map(block => block.text)
+        .join('');
+
+      console.log('🤖 Claude 原始返回:', content);
 
       let jsonStr = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
       const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
@@ -553,7 +557,7 @@ ${chartToolsDesc}
 
       return JSON.parse(jsonStr);
     } catch (error: any) {
-      console.error('❌ LLM 分析失败:', error.message);
+      console.error('❌ Claude 分析失败:', error.message);
       return {
         needDatabase: false,
         chartData: this.getDefaultChartData()
@@ -569,62 +573,68 @@ ${chartToolsDesc}
     data: any[],
     chartTools: MCPTool[]
   ): Promise<ParsedChartData> {
-    const apiKey = process.env.ZHIPU_API_KEY || 'c29c79f11c4a47c68aff598bfc336e3f.Ci1b9LUredlioVJ7';
-    const apiUrl = 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
-
     const chartToolsDesc = this.buildToolsDescription(chartTools);
 
-    const prompt = `请根据查询到的真实数据，生成图表参数。
+    // 优化：更详细的图表选择指南和参数说明
+    const systemPrompt = `你是数据可视化助手，将数据库查询结果转换为图表数据格式。
 
-## 用户原始请求
+## 可用的图表工具
+${chartToolsDesc}
+
+## 图表类型选择指南（非常重要！）
+1. **generate_column_chart**（推荐）：纵向柱状图，分类在X轴，数值在Y轴。适用于类别比较。
+2. **generate_bar_chart**：横向柱状图，分类在Y轴，数值在X轴。仅当类别名称很长时使用。
+3. **generate_pie_chart**：饼图，适用于展示占比/比例关系。
+4. **generate_line_chart**：折线图，适用于时间序列趋势。
+
+## 数据格式规范
+- 柱状图/饼图: data = [{"category": "分类名称", "value": 100}]
+- 多系列柱状图: data = [{"category": "分类", "value": 100, "group": "系列名"}]
+- 折线图: data = [{"time": "时间", "value": 100, "group": "系列名(可选)"}]
+
+## 返回格式（必须包含 axisXTitle 和 axisYTitle）
+{
+  "toolName": "generate_column_chart",
+  "title": "图表标题",
+  "arguments": {
+    "data": [{"category": "分类1", "value": 100}, {"category": "分类2", "value": 200}],
+    "title": "图表标题",
+    "axisXTitle": "X轴标题（通常是分类字段名）",
+    "axisYTitle": "Y轴标题（通常是数值/金额/数量等）"
+  }
+}
+
+## 重要规则
+1. 默认使用 generate_column_chart，除非用户明确要求其他类型
+2. 必须设置 axisXTitle 和 axisYTitle
+3. axisXTitle 是分类/维度字段，axisYTitle 是数值/度量字段
+4. 只返回纯 JSON，不要包含任何注释或 markdown 标记`;
+
+    const userPrompt = `## 用户原始请求
 "${originalText}"
 
 ## 数据库查询结果
 ${JSON.stringify(data, null, 2)}
 
-## 可用的图表工具
-${chartToolsDesc}
-
-## 要求
-1. 选择最适合展示这些数据的图表类型
-2. 将数据库查询结果转换为图表所需的格式
-3. 生成合适的标题
-
-## 数据格式说明
-- 饼图/柱状图: data = [{"category": "名称", "value": 数值}]
-- 折线图: data = [{"time": "时间", "value": 数值, "group": "分组(可选)"}]
-
-## 返回格式
-{
-  "toolName": "工具名称",
-  "title": "图表标题",
-  "arguments": {
-    "data": [...],
-    "title": "标题"
-  }
-}
-
-只返回JSON。`;
+请根据上述数据，选择最适合的图表类型并生成完整的参数（包含 axisXTitle 和 axisYTitle）。`;
 
     try {
-      const response = await axios.post(apiUrl, {
-        model: 'glm-4-flash',
+      // 使用 Claude SDK 调用
+      const message = await anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2048,
+        system: systemPrompt,
         messages: [
-          {
-            role: 'system',
-            content: '你是数据可视化助手，将数据库查询结果转换为图表数据格式。只返回纯JSON。'
-          },
-          { role: 'user', content: prompt }
-        ],
-        temperature: 0.1
-      }, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        }
+          { role: 'user', content: userPrompt }
+        ]
       });
 
-      const content = response.data.choices[0].message.content;
+      // 提取文本内容
+      const content = message.content
+        .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+        .map(block => block.text)
+        .join('');
+
       let jsonStr = content.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
       const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -644,10 +654,15 @@ ${chartToolsDesc}
   }
 
   /**
-   * 构建工具描述
+   * 构建工具描述（带缓存）
    */
   private buildToolsDescription(tools: MCPTool[]): string {
-    return tools.map(tool => {
+    // 使用缓存，避免重复构建字符串
+    if (cachedToolsDescription) {
+      return cachedToolsDescription;
+    }
+
+    const description = tools.map(tool => {
       const props = tool.inputSchema?.properties || {};
       const propsDesc = Object.entries(props)
         .map(([key, val]: [string, any]) => {
@@ -670,6 +685,9 @@ ${chartToolsDesc}
 
       return `\n### ${tool.name}\n描述: ${tool.description}\n参数:\n${propsDesc}`;
     }).join('\n');
+
+    cachedToolsDescription = description;
+    return description;
   }
 
   /**
