@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能图表生成器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .main-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .input-section {
+            padding: 40px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            resize: vertical;
+            min-height: 100px;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea::placeholder {
+            color: #999;
+        }
+
+        .examples {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .example-btn {
+            padding: 6px 12px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border: none;
+            border-radius: 20px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .example-btn:hover {
+            background: #bbdefb;
+            transform: translateY(-1px);
+        }
+
+        .generate-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .generate-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        .generate-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .result-section {
+            padding: 40px;
+            display: none;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .chart-container {
+            text-align: center;
+        }
+
+        .chart-title {
+            font-size: 1.5rem;
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .chart-image {
+            max-width: 100%;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        .chart-info {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .chart-type-badge {
+            padding: 6px 16px;
+            background: #667eea;
+            color: white;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+
+        .download-btn {
+            padding: 8px 20px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .error-message {
+            display: none;
+            padding: 15px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+
+        .error-message.active {
+            display: block;
+        }
+
+        .history-section {
+            padding: 40px;
+            background: #f8f9fa;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .history-title {
+            font-size: 1.3rem;
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .history-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .history-item {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .history-item:hover {
+            transform: translateY(-5px);
+        }
+
+        .history-item img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+        }
+
+        .history-item p {
+            padding: 10px;
+            font-size: 13px;
+            color: #666;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.8rem;
+            }
+
+            .input-section, .result-section, .history-section {
+                padding: 20px;
+            }
+
+            .history-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 智能图表生成器</h1>
+            <p>输入自然语言描述，自动生成可视化图表</p>
+        </header>
+
+        <div class="main-card">
+            <!-- 输入区域 -->
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="chartInput">输入统计文本</label>
+                    <textarea
+                        id="chartInput"
+                        placeholder="例如：苹果10个，梨子20个，桃子100个..."
+                    ></textarea>
+                    <div class="examples">
+                        <span style="color: #666; font-size: 13px;">快速示例：</span>
+                        <button class="example-btn" onclick="setExample('苹果10个，梨子20个，桃子100个')">水果统计</button>
+                        <button class="example-btn" onclick="setExample('一季度销售额50万，二季度80万，三季度120万，四季度150万')">季度销售</button>
+                        <button class="example-btn" onclick="setExample('北京人口2000万，上海2500万，广州1500万，深圳1300万')">城市人口</button>
+                        <button class="example-btn" onclick="setExample('周一30度，周二32度，周三35度，周四33度，周五31度')">气温变化</button>
+                    </div>
+                </div>
+                <button class="generate-btn" id="generateBtn" onclick="generateChart()">
+                    ✨ 生成图表
+                </button>
+                <div class="error-message" id="errorMessage"></div>
+            </div>
+
+            <!-- 加载中 -->
+            <div class="loading" id="loadingSection">
+                <div class="spinner"></div>
+                <p>正在分析文本并生成图表...</p>
+            </div>
+
+            <!-- 结果展示 -->
+            <div class="result-section" id="resultSection">
+                <div class="chart-container">
+                    <h3 class="chart-title" id="chartTitle"></h3>
+                    <img class="chart-image" id="chartImage" src="" alt="生成的图表">
+                    <div class="chart-info">
+                        <span class="chart-type-badge" id="chartType"></span>
+                        <button class="download-btn" onclick="downloadChart()">📥 下载图片</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 历史记录 -->
+            <div class="history-section">
+                <h3 class="history-title">
+                    📚 历史记录
+                    <span id="historyCount" style="font-size: 14px; color: #999;"></span>
+                </h3>
+                <div class="history-grid" id="historyGrid">
+                    <div class="empty-state">暂无历史记录</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // API 基础地址
+        const API_BASE = 'http://localhost:3000/api';
+
+        // 当前生成的图表数据
+        let currentChart = null;
+
+        // 页面加载时获取历史记录
+        window.onload = function() {
+            loadHistory();
+        };
+
+        // 设置示例文本
+        function setExample(text) {
+            document.getElementById('chartInput').value = text;
+        }
+
+        // 生成图表
+        async function generateChart() {
+            const input = document.getElementById('chartInput').value.trim();
+            const generateBtn = document.getElementById('generateBtn');
+            const loadingSection = document.getElementById('loadingSection');
+            const resultSection = document.getElementById('resultSection');
+            const errorMessage = document.getElementById('errorMessage');
+
+            // 验证输入
+            if (!input) {
+                showError('请输入要统计的文本');
+                return;
+            }
+
+            // 重置状态
+            errorMessage.classList.remove('active');
+            resultSection.classList.remove('active');
+            loadingSection.classList.add('active');
+            generateBtn.disabled = true;
+            generateBtn.textContent = '生成中...';
+
+            try {
+                const response = await fetch(`${API_BASE}/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: input,
+                        options: {
+                            width: 800,
+                            height: 600
+                        }
+                    })
+                });
+
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error?.message || '生成失败');
+                }
+
+                // 保存当前图表数据
+                currentChart = result.data;
+
+                // 显示结果
+                document.getElementById('chartTitle').textContent = result.data.title;
+                document.getElementById('chartImage').src = result.data.imageUrl;
+                document.getElementById('chartType').textContent = getChartTypeName(result.data.chartType);
+
+                resultSection.classList.add('active');
+
+                // 重新加载历史记录
+                await loadHistory();
+
+            } catch (error) {
+                console.error('生成图表失败:', error);
+                showError(error.message || '生成图表失败，请检查后端服务是否运行');
+            } finally {
+                loadingSection.classList.remove('active');
+                generateBtn.disabled = false;
+                generateBtn.textContent = '✨ 生成图表';
+            }
+        }
+
+        // 获取图表类型中文名
+        function getChartTypeName(type) {
+            const names = {
+                'bar': '柱状图',
+                'line': '折线图',
+                'pie': '饼图',
+                'area': '面积图'
+            };
+            return names[type] || type;
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            const errorMessage = document.getElementById('errorMessage');
+            errorMessage.textContent = message;
+            errorMessage.classList.add('active');
+        }
+
+        // 下载图表
+        function downloadChart() {
+            if (!currentChart) return;
+
+            const link = document.createElement('a');
+            link.href = currentChart.imageUrl;
+            link.download = `chart_${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 加载历史记录
+        async function loadHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/charts`);
+                const result = await response.json();
+
+                if (!result.success) {
+                    throw new Error(result.error?.message);
+                }
+
+                const historyGrid = document.getElementById('historyGrid');
+                const historyCount = document.getElementById('historyCount');
+                const items = result.data.items || [];
+
+                historyCount.textContent = `(${items.length})`;
+
+                if (items.length === 0) {
+                    historyGrid.innerHTML = '<div class="empty-state">暂无历史记录</div>';
+                    return;
+                }
+
+                historyGrid.innerHTML = items.map(item => `
+                    <div class="history-item" onclick="loadChartFromHistory('${item.imageUrl}', '${item.chartType}', '${item.originalText}')">
+                        <img src="${item.imageUrl}" alt="${item.title || '图表'}">
+                        <p title="${item.originalText}">${item.originalText}</p>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('加载历史记录失败:', error);
+            }
+        }
+
+        // 从历史记录加载图表
+        function loadChartFromHistory(imageUrl, chartType, originalText) {
+            currentChart = {
+                imageUrl,
+                chartType,
+                title: originalText.slice(0, 20) + (originalText.length > 20 ? '...' : '')
+            };
+
+            document.getElementById('chartTitle').textContent = currentChart.title;
+            document.getElementById('chartImage').src = imageUrl;
+            document.getElementById('chartType').textContent = getChartTypeName(chartType);
+            document.getElementById('resultSection').classList.add('active');
+
+            // 滚动到结果区域
+            document.getElementById('resultSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // 回车键提交
+        document.getElementById('chartInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                generateChart();
+            }
+        });
+    </script>
+</body>
+</html>

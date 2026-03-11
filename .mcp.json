@@ -1,0 +1,6 @@
+{
+  "chart": {
+    "type": "http",
+    "url": "http://localhost:1123"
+  }
+}

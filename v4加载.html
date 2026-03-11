@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="renderer" content="webkit">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>BIMFACE JSSDK-V4</title>
+    <style media="screen">
+      * {
+        margin: 0;
+        padding: 0
+      }
+
+      html,
+      body {
+        height: 100%
+      }
+
+      .main {
+        height: 100%;
+        width: 100%
+      }
+
+      .model {
+        height: calc(100% - 30px);
+        width: 100%
+      }
+    </style>
+    <script src="https://test-works.haisum.com:43569/static/api/JSHostConfig.js" charset="utf-8"></script>
+</head>
+
+<body>
+    <div class='main'>
+        <div class="top" style="display: flex; justify-content: center; gap: 10px;;">
+
+            <button onclick="saveState()">保存视图</button>
+            <button onclick="recoveryState()">恢复视图</button>
+             <button class="button" id="btnDrawAnnotation" onclick="drawAnnotation()">开始绘制批注</button>
+            <button class="button" id="btnRestoreAnnotation" onclick="restoreAnnotation()">恢复批注</button>
+            
+        </div>
+        <div class='model' id="domId"></div>
+    </div>
+
+    <script type="text/javascript" type="module">
+/*         1:保存和恢复视点
+2：生成视点批注/恢复视点批注功能 */
+        let viewer3D,app,model;
+        let state;
+        const viewToken = "57d0d85e18924d4a87e3f679db196b00";
+
+        const init = async () => {
+          const {BimfaceSDKLoader} = await import('https://static.bimface.com/api/BimfaceSDKLoader/BimfaceSDKLoader-v4.esm.js');
+          const options = {
+            viewToken
+          };
+          const viewMetaData = await BimfaceSDKLoader.load(options);
+
+          let domElement = document.getElementById('domId');
+          app = new Glodon.Bimface.Application.WebApplication3D({
+            domElement,
+            tool: {
+              toolbar: { visible: true },
+              tree: { visible: true }
+            }
+          });
+          window.viewer3D=viewer3D;
+          // 构造viewer对象，可设置交互、渲染效果等
+          viewer3D = app.createViewer({
+            interaction: {
+              orbit: true
+            },
+            performance: {
+              memoryThreshold: 2048
+            },
+            visualization: {
+              ambientOcclusion: false,  // 关闭环境遮罩
+              csmShadow: false,  // 关闭CSM阴影
+              wireframe: false,   // 关闭线框
+              envMap:true // 开启环境贴图
+            }
+          });
+
+          // 添加对应监听事件
+          viewer3D.addEventListener(Glodon.Bimface.Viewer.Viewer3DEvent.ViewAdded, () => console.log('ViewAdded'));
+
+          // 获取模型对象，异步调用
+          model = await viewer3D.loadModel({viewMetaData, modelId: 'test'});
+        }
+        function saveState(){
+             state=viewer3D.getCurrentState();
+        
+        }
+        function recoveryState(){
+            if(state){
+                viewer3D.setState(state)
+            }else{
+                alert('请先保存视图')
+            }
+        }
+        init();
+
+  let isDrawAnnotationActivated = false;
+    let annotationToolbar = null;
+    let annotationState = null;
+    function createAnnotationToolbar() {
+      if (!annotationToolbar) {
+        // 创建批注工具条的配置
+        let config = new Glodon.Bimface.Plugins.Annotation.AnnotationToolbarConfig();
+        config.viewer = viewer3D;
+        // 创建批注工具条
+        annotationToolbar = new Glodon.Bimface.Plugins.Annotation.AnnotationToolbar(config);
+        annotationToolbar.getAnnotationManager().setFillColor(new Glodon.Web.Graphics.Color(255, 0, 0, 0.3));
+
+        // 注册批注工具条的监听事件
+        annotationToolbar.addEventListener(Glodon.Bimface.Plugins.Annotation.AnnotationToolbarEvent.Saved, onAnnotationSaved);
+        annotationToolbar.addEventListener(Glodon.Bimface.Plugins.Annotation.AnnotationToolbarEvent.Cancelled, eixtAnnotation);
+      }
+    }
+
+    // 保存批注并退出
+    function onAnnotationSaved() {
+      annotationState = annotationToolbar.getAnnotationManager().getCurrentState();
+      console.log(JSON.stringify(annotationState));
+      // 批注导出快照
+      annotationToolbar.getAnnotationManager().createSnapshot(function (img) {
+        let image = new Image();
+        image.src = img;
+        document.body.appendChild(image);
+      });
+      eixtAnnotation();
+    }
+
+    // 退出批注
+    function eixtAnnotation() {
+      // 显示主工具条
+      app.getToolbar("MainToolbar").show();
+      annotationToolbar.getAnnotationManager().exit();
+      // 批注的激活状态为false
+      isDrawAnnotationActivated = false;
+    }
+ // 绘制批注
+    function drawAnnotation() {
+      // 创建批注工具条
+      createAnnotationToolbar();
+      if (!isDrawAnnotationActivated) {
+        // 隐藏主工具条
+        app.getToolbar("MainToolbar").hide();
+        // 显示批注工具条
+        annotationToolbar.show();
+        // 修改批注的激活状态为true
+        isDrawAnnotationActivated = true;
+      }
+    }
+
+    // 恢复批注
+    function restoreAnnotation() {
+      if (annotationState != null) {
+        // 恢复批注
+        annotationToolbar.getAnnotationManager().setState(annotationState);
+        // 开始绘制批注
+        drawAnnotation();
+      } else {
+        window.alert("请先绘制并保存批注！");
+      }
+    }
+    </script>
+</body>
+
+</html>

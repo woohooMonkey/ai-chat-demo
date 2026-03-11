@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>月度收入统计</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Plus+Jakarta+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --bar-gradient: linear-gradient(180deg, #f093fb 0%, #f5576c 100%);
+            --bg-color: #0f0f23;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b8;
+            --grid-color: rgba(255, 255, 255, 0.05);
+        }
+
+        body {
+            min-height: 100vh;
+            background: var(--bg-color);
+            background-image:
+                radial-gradient(ellipse at 20% 80%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 20%, rgba(245, 87, 108, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            padding: 40px 20px;
+        }
+
+        .chart-container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--card-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 24px;
+            padding: 48px;
+            box-shadow:
+                0 25px 50px -12px rgba(0, 0, 0, 0.5),
+                inset 0 1px 1px rgba(255, 255, 255, 0.05);
+        }
+
+        .chart-header {
+            margin-bottom: 40px;
+        }
+
+        .chart-title {
+            font-family: 'Playfair Display', serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .chart-subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 300px;
+            display: flex;
+            align-items: flex-end;
+            padding-bottom: 40px;
+            margin-left: 50px;
+        }
+
+        .y-axis {
+            position: absolute;
+            left: -50px;
+            top: 0;
+            bottom: 40px;
+            width: 40px;
+            display: flex;
+            flex-direction: column-reverse;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+
+        .y-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            transform: translateY(50%);
+        }
+
+        .grid-lines {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 40px;
+            display: flex;
+            flex-direction: column-reverse;
+            justify-content: space-between;
+        }
+
+        .grid-line {
+            width: 100%;
+            height: 1px;
+            background: var(--grid-color);
+            position: relative;
+        }
+
+        .bars-container {
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            gap: 80px;
+            width: 100%;
+            height: 100%;
+            padding: 0 40px;
+        }
+
+        .bar-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .bar {
+            width: 60px;
+            border-radius: 8px 8px 4px 4px;
+            position: relative;
+            cursor: pointer;
+            transform-origin: bottom;
+            transform: scaleY(0);
+            animation: growBar 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+            box-shadow:
+                0 10px 40px -10px rgba(245, 87, 108, 0.5),
+                inset 0 1px 1px rgba(255, 255, 255, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .bar::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bar-gradient);
+            border-radius: 8px 8px 4px 4px;
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+
+        .bar:hover {
+            transform: scaleY(1) scaleX(1.1) !important;
+            box-shadow:
+                0 20px 60px -10px rgba(245, 87, 108, 0.7),
+                inset 0 1px 1px rgba(255, 255, 255, 0.4);
+        }
+
+        .bar:hover::before {
+            opacity: 0.9;
+        }
+
+        .bar-value {
+            position: absolute;
+            top: -32px;
+            left: 50%;
+            transform: translateX(-50%) translateY(10px);
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            opacity: 0;
+            animation: fadeInUp 0.6s ease 0.8s forwards;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+        }
+
+        .bar-label {
+            margin-top: 16px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .tooltip {
+            position: fixed;
+            background: rgba(255, 255, 255, 0.95);
+            color: #1a1a2e;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 13px;
+            font-weight: 600;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -100%) translateY(-12px);
+            transition: opacity 0.3s ease;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            z-index: 100;
+        }
+
+        .tooltip::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 6px solid rgba(255, 255, 255, 0.95);
+        }
+
+        .tooltip.show {
+            opacity: 1;
+        }
+
+        .stats-summary {
+            display: flex;
+            justify-content: center;
+            gap: 48px;
+            margin-top: 32px;
+            padding-top: 32px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-family: 'Playfair Display', serif;
+            font-size: 28px;
+            font-weight: 700;
+            background: var(--bar-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        @keyframes growBar {
+            to {
+                transform: scaleY(1);
+            }
+        }
+
+        @keyframes fadeInUp {
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .chart-container {
+                padding: 32px 24px;
+            }
+
+            .chart-title {
+                font-size: 24px;
+            }
+
+            .bars-container {
+                gap: 40px;
+                padding: 0 20px;
+            }
+
+            .bar {
+                width: 48px;
+            }
+
+            .stats-summary {
+                gap: 32px;
+            }
+
+            .stat-value {
+                font-size: 22px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chart-container">
+        <div class="chart-header">
+            <h1 class="chart-title">月度收入</h1>
+            <p class="chart-subtitle">2024年业绩概览</p>
+        </div>
+
+        <div class="chart-wrapper">
+            <div class="y-axis">
+                <span class="y-label">0</span>
+                <span class="y-label">40</span>
+                <span class="y-label">80</span>
+                <span class="y-label">120</span>
+            </div>
+
+            <div class="grid-lines">
+                <div class="grid-line"></div>
+                <div class="grid-line"></div>
+                <div class="grid-line"></div>
+                <div class="grid-line"></div>
+            </div>
+
+            <div class="bars-container">
+                <div class="bar-wrapper">
+                    <div class="bar" style="height: 53.3%; animation-delay: 0.2s;" data-value="80">
+                        <span class="bar-value">80</span>
+                    </div>
+                    <span class="bar-label">1月</span>
+                </div>
+
+                <div class="bar-wrapper">
+                    <div class="bar" style="height: 80%; animation-delay: 0.4s;" data-value="120">
+                        <span class="bar-value">120</span>
+                    </div>
+                    <span class="bar-label">2月</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-summary">
+            <div class="stat-item">
+                <div class="stat-value">200</div>
+                <div class="stat-label">总收入</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">100</div>
+                <div class="stat-label">平均收入</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">+50%</div>
+                <div class="stat-label">环比增长率</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const bars = document.querySelectorAll('.bar');
+        const tooltip = document.getElementById('tooltip');
+
+        bars.forEach(bar => {
+            bar.addEventListener('mouseenter', (e) => {
+                const value = e.target.dataset.value;
+                const rect = e.target.getBoundingClientRect();
+                tooltip.textContent = `收入: ${value}`;
+                tooltip.style.left = `${rect.left + rect.width / 2}px`;
+                tooltip.style.top = `${rect.top}px`;
+                tooltip.classList.add('show');
+            });
+
+            bar.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('show');
+            });
+        });
+
+        // 数字递增动画
+        function animateValue(element, start, end, duration) {
+            let startTimestamp = null;
+            const step = (timestamp) => {
+                if (!startTimestamp) startTimestamp = timestamp;
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+                const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+                element.textContent = Math.floor(start + (end - start) * easeOutQuart);
+                if (progress < 1) {
+                    window.requestAnimationFrame(step);
+                }
+            };
+            window.requestAnimationFrame(step);
+        }
+
+        // 页面加载时触发动画
+        document.addEventListener('DOMContentLoaded', () => {
+            const statValues = document.querySelectorAll('.stat-value');
+            statValues.forEach((el, index) => {
+                const text = el.textContent;
+                if (!text.includes('%')) {
+                    const value = parseInt(text);
+                    el.textContent = '0';
+                    setTimeout(() => {
+                        animateValue(el, 0, value, 1500);
+                    }, 600 + index * 100);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
