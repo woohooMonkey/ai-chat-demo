@@ -10,6 +10,9 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || ''
 });
 
+// 缓存的 MCP 工具定义（转换为 Claude tools 格式）
+let cachedClaudeTools: Anthropic.Tool[] | null = null;
+
 interface GenerateChartRequest {
   text: string;
   options?: {
@@ -92,10 +95,27 @@ function clearToolsCache() {
   cachedChartTools = null;
   chartToolsCacheTime = 0;
   cachedToolsDescription = null;
+  cachedClaudeTools = null;
 }
 
 // 启动时清除缓存
 clearToolsCache();
+
+/**
+ * 将 MCP 工具格式转换为 Claude SDK tools 格式
+ * 这样可以在 API 调用时注册工具，减少 prompt token 消耗
+ */
+function convertMCPToClaudeTools(mcpTools: MCPTool[]): Anthropic.Tool[] {
+  return mcpTools.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    input_schema: {
+      type: 'object' as const,
+      properties: tool.inputSchema.properties,
+      required: tool.inputSchema.required || []
+    }
+  }));
+}
 
 export class ChartService {
   /**
@@ -474,19 +494,21 @@ export class ChartService {
 
   /**
    * 分析用户意图：是否需要数据库，生成 SQL 或图表参数
+   * 优化：使用 tools 参数注册工具，减少 prompt token 消耗
    */
   private async analyzeUserIntent(
     text: string,
     chartTools: MCPTool[],
     dbSchema: string
   ): Promise<LLMResponse> {
-    const chartToolsDesc = this.buildToolsDescription(chartTools);
+    // 转换工具格式（使用缓存）
+    if (!cachedClaudeTools) {
+      cachedClaudeTools = convertMCPToClaudeTools(chartTools);
+      console.log('🔧 已缓存 Claude tools 格式:', cachedClaudeTools.length, '个工具');
+    }
 
-    // 优化：更清晰的 SQL 生成规则和字段映射
+    // 简化的 system prompt（不再包含工具描述）
     const systemPrompt = `你是一个智能数据分析助手，能够判断是否需要查询数据库并生成SQL或图表数据。
-
-## 可用的图表工具
-${chartToolsDesc}
 
 ## 判断规则
 1. 如果用户请求涉及"查询"、"统计"、"按...分组"、"各..."等关键词，需要查询数据库
@@ -522,23 +544,25 @@ ${chartToolsDesc}
 
 只返回纯 JSON。`;
 
-    const userPrompt = `## 用户请求
-"${text}"
+    // 简化的 user prompt
+    const userPrompt = `用户请求: "${text}"
 
-## 数据库表结构
+数据库表结构:
 ${dbSchema || '(无法获取数据库结构)'}
 
-请根据用户请求中的关键词（地区/品类/产品），选择正确的字段生成 SQL。`;
+请根据用户请求中的关键词选择正确的字段生成 SQL 或图表数据。`;
 
     try {
-      // 使用 Claude SDK 调用
+      // 使用 Claude SDK 调用，通过 tools 参数注册工具
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
         system: systemPrompt,
         messages: [
           { role: 'user', content: userPrompt }
-        ]
+        ],
+        // 关键优化：通过 tools 参数注册工具，而不是放在 prompt 中
+        tools: cachedClaudeTools
       });
 
       // 提取文本内容
@@ -567,19 +591,15 @@ ${dbSchema || '(无法获取数据库结构)'}
 
   /**
    * 基于真实数据生成图表参数
+   * 优化：使用 tools 参数注册工具，减少 prompt token 消耗
    */
   private async generateChartFromData(
     originalText: string,
     data: any[],
-    chartTools: MCPTool[]
+    _chartTools: MCPTool[]  // 不再需要，使用缓存的 cachedClaudeTools
   ): Promise<ParsedChartData> {
-    const chartToolsDesc = this.buildToolsDescription(chartTools);
-
-    // 优化：更详细的图表选择指南和参数说明
+    // 简化的 system prompt（不再包含工具描述）
     const systemPrompt = `你是数据可视化助手，将数据库查询结果转换为图表数据格式。
-
-## 可用的图表工具
-${chartToolsDesc}
 
 ## 图表类型选择指南（非常重要！）
 1. **generate_column_chart**（推荐）：纵向柱状图，分类在X轴，数值在Y轴。适用于类别比较。
@@ -610,23 +630,24 @@ ${chartToolsDesc}
 3. axisXTitle 是分类/维度字段，axisYTitle 是数值/度量字段
 4. 只返回纯 JSON，不要包含任何注释或 markdown 标记`;
 
-    const userPrompt = `## 用户原始请求
-"${originalText}"
+    const userPrompt = `用户请求: "${originalText}"
 
-## 数据库查询结果
+数据库查询结果:
 ${JSON.stringify(data, null, 2)}
 
-请根据上述数据，选择最适合的图表类型并生成完整的参数（包含 axisXTitle 和 axisYTitle）。`;
+请选择最适合的图表类型并生成完整的参数（包含 axisXTitle 和 axisYTitle）。`;
 
     try {
-      // 使用 Claude SDK 调用
+      // 使用 Claude SDK 调用，通过 tools 参数注册工具
       const message = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2048,
         system: systemPrompt,
         messages: [
           { role: 'user', content: userPrompt }
-        ]
+        ],
+        // 关键优化：通过 tools 参数注册工具，而不是放在 prompt 中
+        tools: cachedClaudeTools || undefined
       });
 
       // 提取文本内容

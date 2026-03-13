@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { chartRouter } from './routes/chartRoutes';
+import { claudeRouter } from './routes/claudeRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 52465;
@@ -24,6 +25,7 @@ app.use('/charts', express.static(chartsDir));
 
 // API 路由
 app.use('/api', chartRouter);
+app.use('/api', claudeRouter);
 
 // 健康检查
 app.get('/health', (req, res) => {
